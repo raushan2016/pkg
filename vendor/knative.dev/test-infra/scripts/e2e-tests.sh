@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Copyright 2019 The Knative Authors
 #
@@ -93,13 +93,32 @@ function dump_cluster_state() {
   echo "***         E2E TEST FAILED         ***"
   echo "***    Start of information dump    ***"
   echo "***************************************"
-  echo ">>> All resources:"
-  kubectl get all --all-namespaces
-  echo ">>> Services:"
-  kubectl get services --all-namespaces
-  echo ">>> Events:"
-  kubectl get events --all-namespaces
-  function_exists dump_extra_cluster_state && dump_extra_cluster_state
+
+  local output="${ARTIFACTS}/k8s.dump.txt"
+  echo ">>> The dump is located at ${output}"
+
+  for crd in $(kubectl api-resources --verbs=list -o name | sort); do
+    local count="$(kubectl get $crd --all-namespaces --no-headers 2>/dev/null | wc -l)"
+    echo ">>> ${crd} (${count} objects)"
+    if [[ "${count}" > "0" ]]; then
+      echo ">>> ${crd} (${count} objects)" >> ${output}
+
+      echo ">>> Listing" >> ${output}
+      kubectl get ${crd} --all-namespaces >> ${output}
+
+      echo ">>> Details" >> ${output}
+      if [[ "${crd}" == "secrets" ]]; then
+        echo "Secrets are ignored for security reasons" >> ${output}
+      else
+        kubectl get ${crd} --all-namespaces -o yaml >> ${output}
+      fi
+    fi
+  done
+
+  if function_exists dump_extra_cluster_state; then
+    echo ">>> Extra dump" >> ${output}
+    dump_extra_cluster_state >> ${output}
+  fi
   echo "***************************************"
   echo "***         E2E TEST FAILED         ***"
   echo "***     End of information dump     ***"
@@ -226,7 +245,7 @@ function create_test_cluster() {
   local test_wrapper="${kubedir}/e2e-test.sh"
   mkdir ${kubedir}/cluster
   ln -s "$(which kubectl)" ${kubedir}/cluster/kubectl.sh
-  echo "#!/bin/bash" > ${test_wrapper}
+  echo "#!/usr/bin/env bash" > ${test_wrapper}
   echo "cd $(pwd) && set -x" >> ${test_wrapper}
   echo "${E2E_SCRIPT} ${test_cmd_args}" >> ${test_wrapper}
   chmod +x ${test_wrapper}
